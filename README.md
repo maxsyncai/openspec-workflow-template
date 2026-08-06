@@ -215,19 +215,26 @@ Consequências práticas:
 - Para override total, o repo precisa dos **7 arquivos** do array `CANON`
   (ver [§7.4](#74-estrutura-do-repo-externo-override-total)).
 
-### 7.3 `workflow.version` NÃO é overridável
+### 7.3 `workflow.version` é overridável
 
-`workflow.version` (semver do workflow, ex.: `1.0.1`) **não está no array `CANON`**
-(`sync-workflow.sh:52-60`) — é lido só de `assets/workflow.version` da skill
-instalada. Ou seja: a **versão do workflow é controlada pela skill**, não pelo
-template externo. Implicações:
+A partir da v1.0.2, `workflow.version` **é overridável** pelo repo externo. O
+script (`sync-workflow.sh`) lê `WORKFLOW_VERSION` na seguinte precedência:
 
-- Atualizar o repo externo **não bumpa** `workflow_version` em projetos — só
-  trocando a skill instalada (bumpando a versão em `assets/workflow.version`).
-- Projetos só detectam "drift" comparando `workflow_version` vs `WORKFLOW_VERSION`
-  da skill instalada, **não** vs o repo externo.
-- Se quiser que o externo governe versão também, precisa adicionar
-  `workflow.version` ao array `CANON` (edite o script — é mudança na skill).
+1. `$EXTERNAL_OVERRIDES/workflow.version` (se existir)
+2. `$ASSETS/workflow.version` (fallback que sempre existe na skill instalada)
+
+Antes da v1.0.2, o script lia `WORKFLOW_VERSION` de `assets/` **antes** de
+detectar o repo externo — causing abort prematuro em installs onde `assets/`
+estava faltante ou decision de drift com versão errada. A v1.0.2 inverte:
+detecta a fonte primeiro, depois lê a versão da fonte efetiva.
+
+**Implicações**:
+
+- O externo PODE publicar `workflow.version` para governar versão de múltiplos
+  projetos sem bump de skill instalada.
+- Se o externo não publicar `workflow.version` (default), cai em `assets/`.
+- Projetos detectam drift comparando `workflow_version` vs o `WORKFLOW_VERSION`
+  efetivo (que pode vir do externo se ele publicar).
 
 ### 7.4 Estrutura do repo externo (override total)
 
@@ -236,6 +243,7 @@ a árvore abaixo (espelha as chaves `dst` do array `CANON` em `sync-workflow.sh:
 
 ```
 openspec-workflow-template/
+├── workflow.version         ← opcional; se publicado, override assets/workflow.version (v1.0.2+)
 ├── AGENTS.md
 ├── dev-workflow.md
 ├── scripts/
@@ -248,8 +256,9 @@ openspec-workflow-template/
         └── design.md
 ```
 
-**Não incluir** `workflow.version` aqui — mesmo que colocasse, seria ignorado
-(ver [§7.3](#73-workflowversion-não-é-overridável)). A versão fica na skill, não no template.
+A partir da v1.0.2, incluir `workflow.version` no externo faz ele override
+`assets/workflow.version` (ver [§7.3](#73-workflowversion-é-overridável)).
+Se não incluir, cai no fallback `assets/`.
 
 Atalho para gerar a árvore a partir dos `assets/` locais:
 
@@ -306,7 +315,7 @@ air-gapped; apontar um fork privado diferente do
 2. maxsyncai/openspec-workflow-template (GitHub)  ← se acessível
 3. assets/ embutidos na skill                     ← fallback
 
-   (workflow.version: só #3 — nunca #1 ou #2)
+   (workflow.version: precedência idêntica — 1 > 2 > 3, desde v1.0.2)
 ```
 
 ### 7.7 Quando NÃO contar com o repo externo
@@ -612,11 +621,13 @@ propaga (após bump de versão e redistribute). Regra prática:
 |---|---|---|
 | 1.0.0 | (preexistente) | Versão inicial da skill: `sync-workflow.sh`, `assets/`, `SKILL.md`, `references/merge-strategy.md` |
 | 1.0.1 | 2026-08-05 | **Fix**: `{{WORKFLOW_VERSION}}` agora auto-substituído em `AGENTS.md` do projeto-alvo (bloco `sed` com guarda `grep -q`). **Fix**: `workflow_version:` duplicado em bootstrap — template `assets/openspec/config.yaml` sem chave hardcoded + lógica `sed`/`append` robusta (não depende mais de `BOOTSTRAP`). **Docs**: `README.md` adicionado (guia de uso humano), seções novas — [§3 Repositórios em jogo](#3-repositórios-em-jogo), [§12 Estrutura dos repositórios](#12-estrutura-dos-repositórios) com diagrama ASCII, [§13 Glossário](#13-glossário), [§14 Changelog](#14-changelog). Cleanup de referências a projetos específicos em `README.md`/`SKILL.md`/`merge-strategy.md`. Sections numeradas. |
+| 1.0.2 | 2026-08-05 | **Fix**: `sync-workflow.sh` reordenado — detecção do repo externo (`git ls-remote` + clone shallow) agora ocorre **antes** da leitura de `WORKFLOW_VERSION` e da detecção de bootstrap/drift. Antes, o script abortava prematuro ou decidia drift com versão errada em installs onde `assets/workflow.version` estava faltante/desatualizada, sem nunca consultar o externo. **Mudança de design**: `workflow.version` AGORA é overridável pelo repo externo (precedência: `EXTERNAL_OVERRIDES/workflow.version` > `assets/workflow.version`). Mensagem de abort mais clara (enumera ambas as fontes tentadas). Log explícito da fonte ativa ("Usando repo externo ... override" vs "Repo externo inacessível — usando assets/ embutidos"). README [§7.3](#73-workflowversion-é-overridável), [§7.4](#74-estrutura-do-repo-externo-override-total), [§7.6](#76-ordem-de-precedência-por-arquivo) atualizados. |
 
 ---
 
 ## Versão
 
-`workflow.version`: **1.0.1** — bump semver a cada mudança de contrato nos 7
-arquivos canônicos. Projetos detectam drift comparando com `workflow_version`
+`workflow.version`: **1.0.2** — bump semver a cada mudança de contrato nos 7
+arquivos canônicos ou no comportamento do `sync-workflow.sh`. Projetos detectam
+drift comparando com `workflow_version`
 em `openspec/config.yaml`.

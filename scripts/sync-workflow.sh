@@ -24,21 +24,49 @@ set -eo pipefail
 
 SKILL_DIR="${SKILL_DIR:-$(cd "$(dirname "$0")/.." && pwd)}"
 ASSETS="$SKILL_DIR/assets"
-WORKFLOW_VERSION_FILE="$ASSETS/workflow.version"
-WORKFLOW_VERSION=$(cat "$WORKFLOW_VERSION_FILE" 2>/dev/null | tr -d '[:space:]')
-
-if [[ -z "$WORKFLOW_VERSION" ]]; then
-  echo "✗ workflow.version não encontrado em $ASSETS"
-  exit 1
-fi
-
-PROJECT_ROOT="${PROJECT_ROOT:-$(pwd)}"
-OPENSPEC_CONFIG="$PROJECT_ROOT/openspec/config.yaml"
 
 # ---------- helpers ----------
 
 step() { echo -e "\n[$1] $2"; }
 abort() { echo "✗ $*"; exit 1; }
+
+# ---------- detecta repo externo (opcional, override) ----------
+# FEITO PRIMEIRO: a detecção da fonte efetiva (externo > assets) deve preceder
+# a leitura de WORKFLOW_VERSION e a construção de CANON, para que a versão e
+# os arquivos venham da fonte certa. Antes esta detecção vinha depois da
+# leitura de WORKFLOW_VERSION, causando abort prematuro em installs onde
+# assets/ estava faltante/desatualizado (bug v1.0.1 — fix v1.0.2).
+
+EXTERNAL_OVERRIDES="${EXTERNAL_OVERRIDES:-}"
+if [[ -z "$EXTERNAL_OVERRIDES" ]]; then
+  if git ls-remote https://github.com/maxsyncai/openspec-workflow-template HEAD >/dev/null 2>&1; then
+    EXTERNAL_OVERRIDES="/tmp/openspec-workflow-template-$$"
+    git clone --depth 1 https://github.com/maxsyncai/openspec-workflow-template "$EXTERNAL_OVERRIDES" >/dev/null 2>&1 || \
+      EXTERNAL_OVERRIDES=""
+  fi
+fi
+
+# ---------- determina WORKFLOW_VERSION da fonte efetiva ----------
+# Precedência: EXTERNAL_OVERRIDES/workflow.version > assets/workflow.version
+WORKFLOW_VERSION=""
+if [[ -n "$EXTERNAL_OVERRIDES" && -f "$EXTERNAL_OVERRIDES/workflow.version" ]]; then
+  WORKFLOW_VERSION=$(cat "$EXTERNAL_OVERRIDES/workflow.version" 2>/dev/null | tr -d '[:space:]')
+fi
+if [[ -z "$WORKFLOW_VERSION" && -f "$ASSETS/workflow.version" ]]; then
+  WORKFLOW_VERSION=$(cat "$ASSETS/workflow.version" 2>/dev/null | tr -d '[:space:]')
+fi
+
+if [[ -z "$WORKFLOW_VERSION" ]]; then
+  echo "✗ workflow.version não encontrado (tentei: externo em $EXTERNAL_OVERRIDES, assets em $ASSETS)"
+  # cleanup antes de abortar
+  if [[ -n "$EXTERNAL_OVERRIDES" && -d "$EXTERNAL_OVERRIDES" ]]; then
+    rm -rf "$EXTERNAL_OVERRIDES"
+  fi
+  exit 1
+fi
+
+PROJECT_ROOT="${PROJECT_ROOT:-$(pwd)}"
+OPENSPEC_CONFIG="$PROJECT_ROOT/openspec/config.yaml"
 
 # ---------- modos ----------
 
@@ -81,16 +109,10 @@ else
   fi
 fi
 
-# ---------- verifica repo externo (opcional, override) ----------
-
-EXTERNAL_OVERRIDES="${EXTERNAL_OVERRIDES:-}"
-if [[ -z "$EXTERNAL_OVERRIDES" ]]; then
-  if git ls-remote https://github.com/maxsyncai/openspec-workflow-template HEAD >/dev/null 2>&1; then
-    echo "  ℹ Repo externo maxsyncai/openspec-workflow-template detectado."
-    EXTERNAL_OVERRIDES="/tmp/openspec-workflow-template-$$"
-    git clone --depth 1 https://github.com/maxsyncai/openspec-workflow-template "$EXTERNAL_OVERRIDES" >/dev/null 2>&1 || \
-      EXTERNAL_OVERRIDES=""
-  fi
+if [[ -n "$EXTERNAL_OVERRIDES" ]]; then
+  echo "  ℹ Usando repo externo maxsyncai/openspec-workflow-template (override)."
+else
+  echo "  ℹ Repo externo inacessível — usando assets/ embutidos (fallback)."
 fi
 
 # ---------- computa diffs ----------
